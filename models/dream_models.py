@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import List
 from collections import OrderedDict
-from .add_blocks import FirstConvBlock, SELayerSimple, ConformerSASwiGLULayer
+from . import blocks
 
 class DREAM_RNN(nn.Module):
     def __init__(
@@ -11,8 +11,8 @@ class DREAM_RNN(nn.Module):
         in_channels: int = 4,
         first_out_channels: int = 320,
         core_out_channels: int = 320,
-        last_layer_channels: int = 256,
-        seqsize: int = 150,
+        final_block: str = 'human',
+        seqsize: int = 200,
         lstm_hidden_channels: int = 320,
         first_kernel_sizes: List[int] = [9, 15],
         core_kernel_sizes: List[int] = [9, 15],
@@ -20,12 +20,12 @@ class DREAM_RNN(nn.Module):
         first_dropout: float = 0.2,
         core_dropout_1: float = 0.2,
         core_dropout_2: float = 0.5,
-        final_activation=nn.SiLU
     ):
         super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         each_first_out_channels = first_out_channels // len(first_kernel_sizes)
         self.conv_list_first = nn.ModuleList([
-            FirstConvBlock(in_channels, each_first_out_channels, k, pool_size, first_dropout) for k in first_kernel_sizes
+            blocks.FirstConvBlock(in_channels, each_first_out_channels, k, pool_size, first_dropout) for k in first_kernel_sizes
         ])
 
         # core block
@@ -35,21 +35,17 @@ class DREAM_RNN(nn.Module):
                             batch_first=True, 
                             bidirectional=True)
         self.conv_list_core = nn.ModuleList([
-            FirstConvBlock(2 * lstm_hidden_channels, each_core_out_channels, k, pool_size, core_dropout_1) for k in core_kernel_sizes
+            blocks.FirstConvBlock(2 * lstm_hidden_channels, each_core_out_channels, k, pool_size, core_dropout_1) for k in core_kernel_sizes
         ])
         self.do = nn.Dropout(core_dropout_2)
 
         # final block
-        self.final_mapper = nn.Sequential(
-            nn.Conv1d(
-                in_channels=core_out_channels,
-                out_channels=last_layer_channels,
-                kernel_size=1,
-                padding='same'
-            ),
-            final_activation()
-        )
-        self.final_linear = nn.Linear(last_layer_channels, 1)
+        if final_block == 'human':
+            self.final_block = blocks.HumanFinalBlock(in_channels=core_out_channels)
+        elif final_block == 'yeast':
+            self.final_block = blocks.YeastFinalBlock(in_channels=core_out_channels)
+        else:
+            raise ValueError("Final block must be either 'human' or 'yeast'")
     
     def forward(self, x) -> torch.Tensor:
         # x: (batch_size, 4, seq_len), 4 channels: A, C, G, T
@@ -77,12 +73,18 @@ class DREAM_RNN(nn.Module):
         x = self.do(x)  # (batch_size, conv_out_channels, seq_len // pool_size)
 
         # final block
-        x = self.final_mapper(x)
-        x = F.adaptive_avg_pool1d(x, 1)
-        x = x.squeeze(2) 
-        x = self.final_linear(x)
-        
+        x = self.final_block(x)
         return x
+    
+    def predict(self,x):
+        x=self(x)
+        if isinstance(self.final_block, blocks.HumanFinalBlock):
+            return x
+        else:
+            bins=torch.arange(18,device=self.device)
+            x = F.softmax(x, dim=1)
+            score = (x * bins).sum(dim=1)
+            return score
     
 class DREAM_CNN(nn.Module):
     def __init__(
@@ -90,8 +92,8 @@ class DREAM_CNN(nn.Module):
         in_channels: int = 4,
         first_out_channels: int = 320,
         core_out_channels: int = 64,
-        last_layer_channels: int = 256,
-        seqsize: int = 150,
+        final_block: str = 'human',
+        seqsize: int = 200,
         first_kernel_sizes: List[int] = [9, 15],
         pool_size: int = 1,
         first_dropout: float = 0.2,
@@ -103,13 +105,12 @@ class DREAM_CNN(nn.Module):
         core_activation=nn.SiLU,
         core_ks: int = 7,
         core_block_sizes = [128, 128, 64, 64, 64],
-        final_activation=nn.SiLU
-        
     ):
         super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         each_first_out_channels = first_out_channels // len(first_kernel_sizes)
         self.conv_list_first = nn.ModuleList([
-            FirstConvBlock(in_channels, each_first_out_channels, k, pool_size, first_dropout) for k in first_kernel_sizes
+            blocks.FirstConvBlock(in_channels, each_first_out_channels, k, pool_size, first_dropout) for k in first_kernel_sizes
         ])
 
         # core block
@@ -141,7 +142,7 @@ class DREAM_CNN(nn.Module):
                                 momentum=core_bn_momentum),
                 core_activation(),
                 nn.Dropout(core_dropout),
-                SELayerSimple(prev_sz, sz * core_resize_factor, reduction=core_se_reduction),
+                blocks.SELayerSimple(prev_sz, sz * core_resize_factor, reduction=core_se_reduction),
                 nn.Conv1d(
                     in_channels=sz * core_resize_factor,
                     out_channels=prev_sz,
@@ -175,16 +176,12 @@ class DREAM_CNN(nn.Module):
         self.seqextractor = nn.ModuleDict(seqextblocks)
 
         # final block
-        self.final_mapper = nn.Sequential(
-            nn.Conv1d(
-                in_channels=core_out_channels,
-                out_channels=last_layer_channels,
-                kernel_size=1,
-                padding='same'
-            ),
-            final_activation()
-        )
-        self.final_linear = nn.Linear(last_layer_channels, 1)
+        if final_block == 'human':
+            self.final_block = blocks.HumanFinalBlock(in_channels=core_out_channels)
+        elif final_block == 'yeast':
+            self.final_block = blocks.YeastFinalBlock(in_channels=core_out_channels)
+        else:
+            raise ValueError("Final block must be either 'human' or 'yeast'")
     
     def forward(self, x) -> torch.Tensor:
         # x: (batch_size, 4, seq_len), 4 channels: A, C, G, T
@@ -204,12 +201,18 @@ class DREAM_CNN(nn.Module):
             x = self.seqextractor[f'resize_blc{i}'](x)
 
         # final block
-        x = self.final_mapper(x)
-        x = F.adaptive_avg_pool1d(x, 1)
-        x = x.squeeze(2) 
-        x = self.final_linear(x)
-        
+        x = self.final_block(x)
         return x
+    
+    def predict(self,x):
+        x=self(x)
+        if isinstance(self.final_block, blocks.HumanFinalBlock):
+            return x
+        else:
+            bins=torch.arange(18,device=self.device)
+            x = F.softmax(x, dim=1)
+            score = (x * bins).sum(dim=1)
+            return score
     
 class DREAM_ATTN(nn.Module):
     def __init__(
@@ -217,8 +220,8 @@ class DREAM_ATTN(nn.Module):
         in_channels: int = 4,
         first_out_channels: int = 256,
         core_out_channels: int=256,
-        last_layer_channels: int = 256,
-        seqsize: int = 150,
+        final_block: str = 'human',
+        seqsize: int = 200,
         first_ks: int = 7,
         first_activation = nn.SiLU,
         first_dropout: float = 0.1,
@@ -226,9 +229,7 @@ class DREAM_ATTN(nn.Module):
         core_num_heads: int = 8,
         core_ks: int = 15,
         core_dropout: float = 0.1,
-        core_n_blocks: int = 4,
-        final_activation=nn.SiLU
-        
+        core_n_blocks: int = 4,        
     ):
         super().__init__()
         self.seqsize = seqsize
@@ -250,24 +251,22 @@ class DREAM_ATTN(nn.Module):
         )
 
         # core block
-        self.core_blocks = nn.ModuleList([ConformerSASwiGLULayer(embedding_dim = first_out_channels,
+        self.core_blocks = nn.ModuleList([blocks.ConformerSASwiGLULayer(
+                                embedding_dim = first_out_channels,
                                 kernel_size = core_ks, rate = core_dropout, 
-                                num_heads = core_num_heads) for _ in range(core_n_blocks)])
+                                num_heads = core_num_heads) 
+                                for _ in range(core_n_blocks)])
         self.core_n_blocks = core_n_blocks
         self.core_out_channels = core_out_channels
         self.core_pos_embedding = nn.Embedding(seqsize, core_out_channels)
 
         # final block
-        self.final_mapper = nn.Sequential(
-            nn.Conv1d(
-                in_channels=core_out_channels,
-                out_channels=last_layer_channels,
-                kernel_size=1,
-                padding='same'
-            ),
-            final_activation()
-        )
-        self.final_linear = nn.Linear(last_layer_channels, 1)
+        if final_block == 'human':
+            self.final_block = blocks.HumanFinalBlock(in_channels=core_out_channels)
+        elif final_block == 'yeast':
+            self.final_block = blocks.YeastFinalBlock(in_channels=core_out_channels)
+        else:
+            raise ValueError("Final block must be either 'human' or 'yeast'")
         
 
     def forward(self, x) -> torch.Tensor:
@@ -288,9 +287,16 @@ class DREAM_ATTN(nn.Module):
         for i in range(self.core_n_blocks) :
             x = self.core_blocks[i](x)
 
-        x = self.final_mapper(x)
-        x = F.adaptive_avg_pool1d(x, 1)
-        x = x.squeeze(2) 
-        x = self.final_linear(x)
-
+        # final block
+        x = self.final_block(x)
         return x
+    
+    def predict(self,x):
+        x=self(x)
+        if isinstance(self.final_block, blocks.HumanFinalBlock):
+            return x
+        else:
+            bins=torch.arange(18,device=self.device)
+            x = F.softmax(x, dim=1)
+            score = (x * bins).sum(dim=1)
+            return score

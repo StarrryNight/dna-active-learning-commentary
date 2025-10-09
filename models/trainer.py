@@ -44,7 +44,8 @@ class Trainer:
             pct_start=0.3,
             three_phase=False
         )
-        self.criterion = nn.MSELoss()
+        self.regression_criterion = nn.MSELoss()
+        self.classification_criterion = nn.KLDivLoss(reduction= "batchmean")
         self.best_pearson = -float("inf")
 
     def train_step(self, batch: dict[str, Any]) -> float:
@@ -53,7 +54,12 @@ class Trainer:
         y = batch["y"].to(self.device).float()
 
         y_pred = self.model(x).squeeze()
-        loss = self.criterion(y_pred, y)
+        if "y_probs" in batch: # yeast, classification
+            y_probs = batch["y_probs"].to(self.device)
+            loss = self.classification_criterion(y_pred, y_probs)
+        else: # regression
+            y = batch["y"].to(self.device)
+            loss = self.regression_criterion(y_pred, y.squeeze(-1))
 
         loss.backward()
         self.optimizer.step()
@@ -70,7 +76,7 @@ class Trainer:
             for batch in tqdm(self.val_dataloader, desc="Validation"):
                 x = batch["x"].to(self.device)
                 y = batch["y"].to(self.device).float()
-                pred = self.model(x).squeeze()
+                pred = self.model.predict(x).squeeze()
 
                 y_true.append(y.cpu().numpy())
                 y_pred.append(pred.cpu().numpy())

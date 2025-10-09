@@ -39,11 +39,11 @@ def ensemble_diff_arch(species: str,
             X = batch["x"].to(device)
 
             if composition != 'cnn-attn':
-                rnn_pred = rnn(X)
+                rnn_pred = rnn.predict(X)
             if composition != 'rnn-attn':
-                cnn_pred = cnn(X)
+                cnn_pred = cnn.predict(X)
             if composition != 'rnn-cnn':
-                attn_pred = attn(X)
+                attn_pred = attn.predict(X)
 
             if composition == 'all_arch':
                 combined=torch.stack((cnn_pred,rnn_pred,attn_pred),dim=0)

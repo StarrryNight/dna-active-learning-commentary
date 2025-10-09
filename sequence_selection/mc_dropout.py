@@ -36,7 +36,7 @@ def mc_dropout(species: str,
             model_preds=[]
 
             for _ in range(num_passes):
-                model_preds.append(model(X))
+                model_preds.append(model.predict(X))
             combined = torch.stack(model_preds).cpu().numpy()
             var = np.var(combined,axis=0)
             all_var.append(var)

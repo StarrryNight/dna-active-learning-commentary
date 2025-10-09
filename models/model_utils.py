@@ -14,11 +14,11 @@ def init_model(species: str, arch: str) -> nn.Module:
 
     match arch:
         case 'rnn':
-            return dream_models.DREAM_RNN(in_channels=num_channels, seqsize=seqsize)
+            return dream_models.DREAM_RNN(in_channels=num_channels,final_block=species, seqsize=seqsize)
         case 'cnn':
-            return dream_models.DREAM_CNN(in_channels=num_channels,seqsize=seqsize)
+            return dream_models.DREAM_CNN(in_channels=num_channels,final_block=species,seqsize=seqsize)
         case 'attn':
-            return dream_models.DREAM_ATTN(in_channels=num_channels,seqsize=seqsize)
+            return dream_models.DREAM_ATTN(in_channels=num_channels,final_block=species,seqsize=seqsize)
         case _:
             raise ValueError("Model architecture must be 'cnn','rnn', or 'attn'")
 

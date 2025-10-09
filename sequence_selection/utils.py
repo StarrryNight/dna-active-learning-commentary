@@ -35,16 +35,11 @@ def free_gpu_mem():
     cp.get_default_memory_pool().free_all_blocks()
     gc.collect()
 
-def clear_gpu():
-    free_gpu_mem()
-    torch.cuda.empty_cache()
-    torch.cuda.ipc_collect()
-
 def get_last_layer(model: nn.Module, 
                    dataloader: DataLoader, 
                    device: torch.device):
     model.to(device).eval()
-    extractor=LayerInputExtractor(model,model.final_mapper[0])
+    extractor=LayerInputExtractor(model,model.final_block)
     with torch.inference_mode():
         for batch in dataloader:
             X = batch["x"].to(device)
@@ -55,7 +50,6 @@ def get_last_layer(model: nn.Module,
 
 def IPCA(model: nn.Module, 
          dataloader: DataLoader, 
-         n_samples: int, 
          n_components: int, 
          batch_size: int=4096): 
     if torch.cuda.is_available():
@@ -76,6 +70,7 @@ def IPCA(model: nn.Module,
             if gpu:
                 free_gpu_mem()
     
+    n_samples=len(dataloader.dataset)//2
     results=cp.empty((n_samples,n_components)) if gpu else np.empty((n_samples,n_components))
     for i, batch in enumerate(get_last_layer(model=model,
                                              dataloader=dataloader, 
@@ -84,7 +79,6 @@ def IPCA(model: nn.Module,
     
     if gpu:
         results=cp.asnumpy(results)
-        clear_gpu()
         
     return results
 

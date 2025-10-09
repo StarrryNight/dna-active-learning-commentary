@@ -2,9 +2,13 @@ import torch, math, json
 import torch.nn.functional as F
 import pandas as pd
 import numpy as np
+import os
+import scipy
+from typing import ClassVar
 
 CODES = {"A": 0, "T": 3, "G": 1, "C": 2, 'N': 4}
 COMPL = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
+dirname = os.path.dirname(__file__)
 
 def n2id(n: str) -> int:
     return CODES[n.upper()]
@@ -24,11 +28,6 @@ def pad_sequence(seq, seqsize: int) -> str:
     left_pad = total_pad // 2
     right_pad = total_pad - left_pad
     return 'N' * left_pad + seq + 'N' * right_pad
-
-def file_length(file: str) -> int:
-    with open(file,'r') as f:
-        lines=f.readlines()
-        return len(lines)
 
 def preprocess_data(df: pd.DataFrame, 
                     seqsize: int, 
@@ -107,16 +106,24 @@ def preprocess_tsv(path: str,
     return df
 
 class SeqExprDataset(torch.utils.data.Dataset):
+    POINTS: ClassVar[np.ndarray] =  np.array([-np.inf, *range(1, 18, 1), np.inf])
+    
     def __init__(self, 
                  df: pd.DataFrame, 
+                 species: str,
                  seqsize: int,
                  use_single_channel: bool=False,
-                 use_reverse_channel: bool=True):
+                 use_reverse_channel: bool=True,
+                 shift: float=0.5, 
+                 scale: float=0.5):
         self.df = df.reset_index(drop=True)
+        self.species = species
         self.encoder = Seq2Tensor()
         self.seqsize = seqsize
         self.use_single_channel = use_single_channel
         self.use_reverse_channel = use_reverse_channel
+        self.shift = shift
+        self.scale = scale
 
     def __len__(self):
         return len(self.df)
@@ -142,9 +149,20 @@ class SeqExprDataset(torch.utils.data.Dataset):
             X = torch.concat(to_concat, dim=0)
         else:
             X = seq
-            
+        
         y = torch.tensor(row['expr'], dtype=torch.float32)
-        return {"x": X.float(), "y": y}
+        if self.species == 'human':
+            return {"x": X.float(), "y": y}
+        else: # yeast           
+            norm = scipy.stats.norm(loc=y + self.shift,
+                                    scale=self.scale)
+            
+            cumprobs = norm.cdf(self.POINTS)
+            probs = cumprobs[1:] - cumprobs[:-1]
+            return {"x": X.float(), 
+                "y_probs": np.asarray(probs, dtype=np.float32),
+                "y": y,
+            }
     
 class DataloaderWrapper:
     def __init__(self, dataloader: torch.utils.data.DataLoader, batch_per_epoch: int):
@@ -183,6 +201,7 @@ def prepare_dataloader(
                         batch_size=batch_size)
     use_single_channel = species == 'yeast'
     dataset = SeqExprDataset(df=df, 
+                             species=species,
                              seqsize=seqsize,
                              use_single_channel=use_single_channel)
     

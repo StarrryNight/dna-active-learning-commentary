@@ -53,10 +53,10 @@ def train_model(species: str,
 
     trainer.fit()
 
-    eval_model(model_path=f"{model_dir}/model_best.pth",
-               out_file= f"{model_dir}/results.txt",
-               species=species,
-               arch=arch)
+    return eval_model(model_path=f"{model_dir}/model_best.pth",
+                    out_file= f"{model_dir}/results.txt",
+                    species=species,
+                    arch=arch)
 
 def main():
     parser = argparse.ArgumentParser()

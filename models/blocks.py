@@ -110,3 +110,38 @@ class ConformerSASwiGLULayer(nn.Module):
         x = x + 0.5 * self.ff2(x)
         
         return x
+
+class YeastFinalBlock(nn.Module):
+    def __init__(self,in_channels,out_channels=18):
+        super().__init__()
+        self.final_mapper = nn.Conv1d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding='same'
+        )
+    
+    def forward(self, x):
+        x = self.final_mapper(x)
+        x = F.adaptive_avg_pool1d(x, 1)
+        x = x.squeeze(2) 
+        logprobs = F.log_softmax(x, dim=1)
+        return logprobs
+
+class HumanFinalBlock(nn.Module):
+    def __init__(self,in_channels,out_channels=256):
+        super().__init__()
+        self.final_mapper = nn.Conv1d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                padding='same'
+        )
+        self.final_linear = nn.Linear(out_channels, 1) # for human
+    
+    def forward(self,x):
+        x = self.final_mapper(x)
+        x = F.adaptive_avg_pool1d(x, 1)
+        x = x.squeeze(2) 
+        x = self.final_linear(x)
+        return x

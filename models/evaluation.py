@@ -1,4 +1,4 @@
-import torch, csv
+import torch, csv, os, argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -6,6 +6,8 @@ from scipy.stats import pearsonr, spearmanr
 from collections import OrderedDict
 from .dl_utils import prepare_dataloader
 from .model_utils import load_model
+
+dirname = os.path.dirname(__file__)
 
 def load_ground_truth(filename: str | Path) -> np.ndarray:
     with open(filename) as f:
@@ -60,16 +62,16 @@ def calculate_diff_correlations(pair_list, expressions, GROUND_TRUTH_EXP):
 
 def evaluate_yeast_predictions(expressions,result_file: str):
     expressions = np.array(expressions)
-    GROUND_TRUTH_EXP = load_ground_truth('data/yeast/test.txt')
+    GROUND_TRUTH_EXP = load_ground_truth(os.path.join(dirname,'../data/yeast/test.txt'))
     # Load indices for different promoter classes
-    high = load_promoter_class_indices('data/yeast/test_subset_ids/high_exp_seqs.csv')
-    low = load_promoter_class_indices('data/yeast/test_subset_ids/low_exp_seqs.csv')
-    yeast = load_promoter_class_indices('data/yeast/test_subset_ids/yeast_seqs.csv')
-    random = load_promoter_class_indices('data/yeast/test_subset_ids/all_random_seqs.csv')
-    challenging = load_promoter_class_indices('data/yeast/test_subset_ids/challenging_seqs.csv')
-    SNVs = load_promoter_class_indices('data/yeast/test_subset_ids/all_SNVs_seqs.csv')
-    motif_perturbation = load_promoter_class_indices('data/yeast/test_subset_ids/motif_perturbation_seqs.csv')
-    motif_tiling = load_promoter_class_indices('data/yeast/test_subset_ids/motif_tiling_seqs.csv')
+    high = load_promoter_class_indices(os.path.join(dirname,'../data/yeast/test_subset_ids/high_exp_seqs.csv'))
+    low = load_promoter_class_indices(os.path.join(dirname,'../data/yeast/test_subset_ids/low_exp_seqs.csv'))
+    yeast = load_promoter_class_indices(os.path.join(dirname,'../data/yeast/test_subset_ids/yeast_seqs.csv'))
+    random = load_promoter_class_indices(os.path.join(dirname,'../data/yeast/test_subset_ids/all_random_seqs.csv'))
+    challenging = load_promoter_class_indices(os.path.join(dirname,'../data/yeast/test_subset_ids/challenging_seqs.csv'))
+    SNVs = load_promoter_class_indices(os.path.join(dirname,'../data/yeast/test_subset_ids/all_SNVs_seqs.csv'))
+    motif_perturbation = load_promoter_class_indices(os.path.join(dirname,'../data/yeast/test_subset_ids/motif_perturbation_seqs.csv'))
+    motif_tiling = load_promoter_class_indices(os.path.join(dirname,'../data/yeast/test_subset_ids/motif_tiling_seqs.csv'))
 
     final_all = list(range(len(GROUND_TRUTH_EXP)))
 
@@ -154,7 +156,7 @@ def eval_human_model(arch: str,
             predictions=[]
             for batch in dl:
                 X = batch["x"].to(device)
-                predictions.append(model(X).cpu().numpy())
+                predictions.append(model.predict(X).cpu().numpy())
         all_preds=np.concatenate(predictions,axis=0)
         all_preds=np.squeeze(all_preds)
         all_preds = average_fwd_rev_pred(data=all_preds)
@@ -213,7 +215,7 @@ def eval_yeast_model(arch: str,
         predictions=[]
         for batch in test_dl:
             X = batch["x"].to(device)
-            predictions.append(model(X).cpu().numpy())
+            predictions.append(model.predict(X).cpu().numpy())
     all_preds=np.concatenate(predictions,axis=0)
     all_preds=np.squeeze(all_preds)
     result = average_fwd_rev_pred(data=all_preds)

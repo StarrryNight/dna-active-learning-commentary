@@ -41,7 +41,7 @@ def ensemble_same_arch(species: str,
 
             model_preds=[]
             for model in models:
-                model_preds.append(model(X))
+                model_preds.append(model.predict(X))
 
             combined = torch.stack(model_preds).cpu().numpy()
             var = np.var(combined,axis=0)

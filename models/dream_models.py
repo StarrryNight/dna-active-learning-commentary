@@ -8,35 +8,68 @@ from . import blocks
 class DREAM_RNN(nn.Module):
     def __init__(
         self, 
+        #4 channels because ACGT, each channel is a sequence of 0 or 1s
         in_channels: int = 4,
+        #First layer has 320 channels output.  
+        # Takes in 4 channels, and output to 320 channels
         first_out_channels: int = 320,
+        # Core out channels
+        # In this case, there isnt a list of core block size. This means core channel will stay at 320
         core_out_channels: int = 320,
+        # Tells model to use this head, outputting solution for human cells
         final_block: str = 'human',
+        #Size of a dna sequence its reading at one time. This means it takes in 
+        # a len 200 tensor each time, simultaenously for 4 channcles
         seqsize: int = 200,
+        # Happens after the core block and before the final layer
+        # LSTM sort of summarizes and aggregate the results from 320 SEPERATE features and input it to the final block V
         lstm_hidden_channels: int = 320,
+        # The window we slide through the sequence
         first_kernel_sizes: List[int] = [9, 15],
         core_kernel_sizes: List[int] = [9, 15],
+        # Used for down sampling. Takes every x bases in the sequence and only keep the more important one. 
+        # If we pool too much we hit the mathematical limit
         pool_size: int = 1,
+        # How many of the neurons are randomly deactivated in the layer to prevent bias
         first_dropout: float = 0.2,
         core_dropout_1: float = 0.2,
         core_dropout_2: float = 0.5,
     ):
+        #Inherit the other vairables
         super().__init__()
+        #setup gpu
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # We have two kernel sizes, so we equally distribute the channels/features for each kernal size
         each_first_out_channels = first_out_channels // len(first_kernel_sizes)
+
+
+        #Since we have two kernal sizes, we need to create 2 different first conv blocks, stored in a list.list
+        # The list structure is parallel to how we store first_kernal_size
+        # Use special list strucutre nn.module list
         self.conv_list_first = nn.ModuleList([
             blocks.FirstConvBlock(in_channels, each_first_out_channels, k, pool_size, first_dropout) for k in first_kernel_sizes
         ])
 
+        #Same as above
         # core block
         each_core_out_channels = core_out_channels // len(core_kernel_sizes)
+    
+        #Set up lstm block. Not in list because its the same for both kernal sizes 
         self.lstm = nn.LSTM(input_size=first_out_channels, 
                             hidden_size=lstm_hidden_channels, 
                             batch_first=True, 
+                            #This measn we actually have 640 parameters because bidirectional means it also reads it backwords
                             bidirectional=True)
+
+        #Set up core blocks 
         self.conv_list_core = nn.ModuleList([
+            # lstm is 320*2 so we multiplier this by 2 
             blocks.FirstConvBlock(2 * lstm_hidden_channels, each_core_out_channels, k, pool_size, core_dropout_1) for k in core_kernel_sizes
         ])
+
+
+        #Set up drop out
         self.do = nn.Dropout(core_dropout_2)
 
         # final block
@@ -46,22 +79,31 @@ class DREAM_RNN(nn.Module):
             self.final_block = blocks.YeastFinalBlock(in_channels=core_out_channels)
         else:
             raise ValueError("Final block must be either 'human' or 'yeast'")
+        
+#---------------So the point here -- Blocks/layers of a CNN is initiliazed as fields of a Model Object ------
+#---------------Constructor is used to convert input parameters into a model with those fields--------------------#
     
     def forward(self, x) -> torch.Tensor:
         # x: (batch_size, 4, seq_len), 4 channels: A, C, G, T
+        #Make sure x are vectors 
         if len(x.shape) < 3:
+            #Call functional function to convert to vectors like [0,0,1,0]
             x = F.one_hot(x.to(torch.int64), self.in_channels)
+            #change into float for calculation
             x = x.float().permute(0,2,1)
 
-        # get the output of each convolutional layer
+        # get the output of each convolutional layer, there are two because they are in a list
         conv_outputs_first = [conv(x) for conv in self.conv_list_first]  # [(batch_size, each_out_channels, seq_len // pool_size), ...]
 
         # concatenate the outputs along the channel dimension
         x = torch.cat(conv_outputs_first, dim=1)  # (batch_size, out_channels, seq_len // pool_size)
 
         # core block
+        # Rearrange the dimensions
         x = x.permute(0, 2, 1)  # (batch_size, seq_len, in_channels)
+        # Run the lstm layer but ignore the second part of what it returns
         x, _ = self.lstm(x)  # (batch_size, seq_len, 2 * lstm_hidden_channels)
+        #Rearrange the dimensions again
         x = x.permute(0, 2, 1)  # (batch_size, 2 * lstm_hidden_channels, seq_len)
         
         # get the output of each convolutional layer
@@ -70,17 +112,21 @@ class DREAM_RNN(nn.Module):
         # concatenate the outputs along the channel dimension
         x = torch.cat(conv_outputs_core, dim=1)  # (batch_size, conv_out_channels, seq_len // pool_size)
 
+        #manually perform final drop out
         x = self.do(x)  # (batch_size, conv_out_channels, seq_len // pool_size)
 
-        # final block
+        # final block to merge shit
         x = self.final_block(x)
         return x
     
     def predict(self,x):
         x=self(x)
+        #likely because human is a concrete value and we just want that, but others are a list and we choose the maximum
+        #check if its human, if so just return the result
         if isinstance(self.final_block, blocks.HumanFinalBlock):
             return x
         else:
+            #Or else, we perform the softmax and choose the biggest one
             bins=torch.arange(18,device=self.device)
             x = F.softmax(x, dim=1)
             score = (x * bins).sum(dim=1)

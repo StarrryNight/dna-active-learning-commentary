@@ -2,11 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+#This is actually a smaller version of dream_models.py 
+#It contains the building blocks for dream_models.py 
+#It has the same structure as it because we can imagine a model as a big block
+#That contains other smaller blocks
+#Both inherits nn.Module 
+#This one is also full of smaller "Blocks", and those are the layers from nn like Conv1d or Maxpool
+
 class FirstConvBlock(nn.Module):
     """
     Basic convolutional block.
     Consists of a convolutional layer, a max pooling layer and a dropout layer.
     """
+    #Initializing variables like before
     def __init__(
         self,
         in_channels: int, 
@@ -15,11 +23,19 @@ class FirstConvBlock(nn.Module):
         pool_size: int, 
         dropout: float
     ):
+        # Initialize variables like before
         super().__init__()
+
+        #Each first conv block consist of three layers
+        # This layer is the convolution layer that reads the shit
         self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding='same')
+        # This layer is the pooling layer that down sizes sutff
         self.mp = nn.MaxPool1d(kernel_size=pool_size, stride=pool_size)
+        # Drop out to deactive neurons randomly
         self.do = nn.Dropout(dropout)
 
+    # Forward is basically what each layer do when data is passed to it 
+    # In this case, the data go through all the layers and the processed one is returned
     def forward(self, x):
         # x: (batch_size, in_channels, seq_len)
         x = F.relu(self.conv(x))  # (batch_size, out_channels, seq_len)
@@ -27,6 +43,10 @@ class FirstConvBlock(nn.Module):
         x = self.do(x)  # (batch_size, out_channels, seq_len // pool_size)
         return x
     
+    #Squeeze and excite layer   
+        #Basically squeeze each channel into one single number, then use two linear channels followed bytearray
+        #an activation function to calculate the importance of each
+        #Combine this with the previous layer
 class SELayerSimple(nn.Module):
     def __init__(
             self, 
@@ -35,6 +55,7 @@ class SELayerSimple(nn.Module):
             reduction: int=4
         ):
         super().__init__()
+        #This is the layer to excite
         self.fc = nn.Sequential(
                 nn.Linear(out_channels, int(in_channels // reduction)),
                 nn.SiLU(),
@@ -44,11 +65,15 @@ class SELayerSimple(nn.Module):
 
     def forward(self, x):
         b, c, _, = x.size()
+        #Squeeze
         y = x.view(b, c, -1).mean(dim=2)
+        #y are the weights
         y = self.fc(y).view(b, c, 1)
+        #Return x*y so it combines importance with original values
         return x * y
 
 class SwiGLULayer(nn.Module):
+    #This is the swish layer
     def __init__(self, dim):
         super(SwiGLULayer, self).__init__()
         self.dim = dim
@@ -59,7 +84,10 @@ class SwiGLULayer(nn.Module):
         return out * self.swish(gate)
 
 
+
 class FeedForwardSwiGLU(nn.Module):
+    #Apply two linaer transformations using embedding dim 
+    #Prepares for th swiGLY layer
     def __init__(self, embedding_dim, mult=4, rate = 0.0, use_bias = True):
         super(FeedForwardSwiGLU, self).__init__()
         swiglu_out = int(embedding_dim * mult/2)
@@ -122,9 +150,13 @@ class YeastFinalBlock(nn.Module):
         )
     
     def forward(self, x):
+        #applies a conv layer
         x = self.final_mapper(x)
+        # 1 means only 1 output
         x = F.adaptive_avg_pool1d(x, 1)
+        #Squeeze removes dimensions with size 2
         x = x.squeeze(2) 
+        # log_softmax the result
         logprobs = F.log_softmax(x, dim=1)
         return logprobs
 
@@ -143,5 +175,6 @@ class HumanFinalBlock(nn.Module):
         x = self.final_mapper(x)
         x = F.adaptive_avg_pool1d(x, 1)
         x = x.squeeze(2) 
+        # For human we want to apply a linear final transform instead of a log one
         x = self.final_linear(x)
         return x

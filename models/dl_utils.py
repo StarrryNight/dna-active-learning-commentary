@@ -1,12 +1,12 @@
-import torch, math, json
-import torch.nn.functional as F
-import pandas as pd
+import torch, math, json import torch.nn.functional as F import pandas as pd
 import numpy as np
 import os
 import scipy
 from typing import ClassVar
 
+#Nucleic acid bases`
 CODES = {"A": 0, "T": 3, "G": 1, "C": 2, 'N': 4}
+#Its complementary
 COMPL = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
 dirname = os.path.dirname(__file__)
 

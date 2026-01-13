@@ -3,7 +3,9 @@ import torch.nn as nn
 from pathlib import Path
 from . import dream_models
 
+#Some helper functions
 def init_model(species: str, arch: str) -> nn.Module:
+    #Return a model with the right architecture or settings
     match species:
         case 'yeast':
             seqsize=150
@@ -22,6 +24,7 @@ def init_model(species: str, arch: str) -> nn.Module:
         case _:
             raise ValueError("Model architecture must be 'cnn','rnn', or 'attn'")
 
+#Load model from path and load it to the correct device
 def load_model(species: str,
                arch: str,
                path: str | Path = None, 

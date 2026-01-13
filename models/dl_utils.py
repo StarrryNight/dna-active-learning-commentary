@@ -10,29 +10,38 @@ CODES = {"A": 0, "T": 3, "G": 1, "C": 2, 'N': 4}
 COMPL = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
 dirname = os.path.dirname(__file__)
 
+#get the number ID of the nucleic acid base
 def n2id(n: str) -> int:
     return CODES[n.upper()]
 
+#Get ther complementary reversed sequence of a sequence
 def revcomp(seq: str) -> str:
     return ''.join(COMPL[n.upper()] for n in reversed(seq))
 
 class Seq2Tensor:
     def __call__(self, seq: str) -> torch.Tensor:
+        #Convert them to indicies first
         indices = [n2id(base) for base in seq]
+        #Then convert the indices to a torch tensor
         arr = torch.tensor(indices, dtype=torch.long)
+        #Convert each torch tensor to a one hot tensor 
         one_hot = F.one_hot(arr, num_classes=5)[:, :4].float()  # Use only A, C, G, T
         return one_hot.T  # shape: (4, seq_len)
 
+#We need a specific length for the gene
 def pad_sequence(seq, seqsize: int) -> str:
-    total_pad = seqsize - len(seq)
+    #So we pad i ot fill it or remove excessive
+    # total_pad = seqsize - len(seq)
     left_pad = total_pad // 2
     right_pad = total_pad - left_pad
+    #Equally pad right and left
     return 'N' * left_pad + seq + 'N' * right_pad
 
 def preprocess_data(df: pd.DataFrame, 
                     seqsize: int, 
                     species: str,
                     plasmid_path: str | None) -> pd.DataFrame:
+    #preprocess because yeast have plasmid path
     if species == 'human':
         return preprocess_human_data(df, seqsize=seqsize)
     elif species == 'yeast':
@@ -41,11 +50,13 @@ def preprocess_data(df: pd.DataFrame,
     else:
         raise Exception("Dataset not implemented")
 
+#Preprocess human data simply padding sequence 
 def preprocess_human_data(df: pd.DataFrame, seqsize: int) -> pd.DataFrame:
     df=df.copy()
     df['seq'] = df['seq'].apply(pad_sequence,args=(seqsize,))
     return df
 
+#Pad protein data diffenrently
 def preprocess_yeast_data(df: pd.DataFrame, 
                     seqsize: int,
                     plasmid_path: str) -> pd.DataFrame:
@@ -66,9 +77,11 @@ def preprocess_yeast_data(df: pd.DataFrame,
     df.seq = df.seq.str.slice(-seqsize, None)
     return df
 
+#Add reverse sequence 
 def add_revcomp(df: pd.DataFrame,
                 revcomp_same_batch: bool=False,
                 batch_size: int=4096) -> pd.DataFrame:
+    #Create a copy of a certain df, apply rev comp to seq, then set rev to 1 
     df = df.copy()
     rev = df.copy()
     rev['seq'] = df['seq'].apply(revcomp)
@@ -86,11 +99,13 @@ def add_revcomp(df: pd.DataFrame,
     else:
         return pd.concat([df, rev],ignore_index=True)
 
+#Add another parameters
 def add_singleton_column(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["is_singleton"] = np.array([x.is_integer() for x in df['expr']])
     return df 
 
+#Obviously preprocess tsv
 def preprocess_tsv(path: str, 
                    seqsize: int, 
                    species: str,
@@ -105,6 +120,7 @@ def preprocess_tsv(path: str,
         df = add_singleton_column(df)
     return df
 
+#Set up the dataset
 class SeqExprDataset(torch.utils.data.Dataset):
     POINTS: ClassVar[np.ndarray] =  np.array([-np.inf, *range(1, 18, 1), np.inf])
     
@@ -164,6 +180,7 @@ class SeqExprDataset(torch.utils.data.Dataset):
                 "y": y,
             }
     
+    #Wrap dataloader
 class DataloaderWrapper:
     def __init__(self, dataloader: torch.utils.data.DataLoader, batch_per_epoch: int):
         self.dataloader = dataloader
@@ -180,6 +197,7 @@ class DataloaderWrapper:
     def __len__(self):
         return self.batch_per_epoch
 
+#Prepare data loader by setting parameters
 def prepare_dataloader(
     tsv_path: str,
     seqsize: int,
